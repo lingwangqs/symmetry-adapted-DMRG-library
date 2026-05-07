@@ -73,8 +73,6 @@ int main(int argc, char** argv) {
     pass = chain.read_mps(read, read2);
     cout << "read_mps pass=" << pass << endl;
     if (pass) {
-      chain.read_enr(read, read2);
-      chain.read_ww(read, read2);
       chain.prepare_sweep();
     }
   }

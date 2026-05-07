@@ -123,12 +123,12 @@ public:
 
   // ── I/O ──────────────────────────────────────────────────────────────────
   void save_enr();
-  void read_enr(int n_sweeps, int exci_idx);
-  bool read_mps(int n_sweeps, int exci_idx, int which);
-  bool read_mps(int n_sweeps, int exci_idx);
+  void read_enr(int bond1, int bond2);
+  bool read_mps(int bond1);
+  bool read_mps(int bond1, int bond2);
   void save_mps2(int exci);
   void save_ww();
-  void read_ww(int n_sweeps, int exci_idx);
+  void read_ww(int bond1, int bond2);
 
 };
 

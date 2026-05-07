@@ -288,7 +288,7 @@ void DMRG<Scalar,Sym>::hamiltonian_vector_multiplication_idmrg(int il, int ir,
   TensorType *vec2arr = new TensorType[psize];
   TensorType tmp, op;
   int i, j, k, m, m0, m1, m4;
-  dcmplex fac, overlap;
+  Scalar fac, overlap;
   
   // ── Diagonal part (H_left * v * I + I * v * H_right) ──
   if (hh[il].is_null() && hh[ir].is_null()) {
@@ -306,7 +306,6 @@ void DMRG<Scalar,Sym>::hamiltonian_vector_multiplication_idmrg(int il, int ir,
     // Only left env; use identity right
     vec2.contract(hh[il], 0, vec1, 0);
   }
-
   // Determine loop structure (same as original)
   if (il < ns / 2) {
     m1 = il + 1;  //number of sites to be paired
@@ -334,7 +333,7 @@ void DMRG<Scalar,Sym>::hamiltonian_vector_multiplication_idmrg(int il, int ir,
           TensorType ht;
           if (il < ns / 2) ht = opr[ir][k];
           else             ht = opr[il][j];
-          ht *= (double)coup[hmap[j][k]];
+          ht *= coup[hmap[j][k]];
           if (op.is_null()) op = ht;
           else              op += ht;
         }
@@ -389,16 +388,18 @@ void DMRG<Scalar,Sym>::prepare_input_vector_initial(int il, int ir, TensorType& 
   rght.get_bond(0, bb[1]);
   bb[0].invert_bonddir();
   bb[1].invert_bonddir();
+  //fuse_to_singlet: for SU2, this generate a all-one reduced matrix multiply a singlet cgc; for u1, it generate a all-one reduced matrix
   tmp.fuse_to_singlet(bb[0], bb[1]);
   tmp3.contract(left, 0, tmp, 0);
   vec.contract(tmp3, 1, rght, 0);
+  //makeup_input_vector: the function creates memory for valid blocks which has nullptr
   vec.makeup_input_vector();
 
   if (il + 1 != ir) return;
   for (j = 0; j < exci; ++j) {
     left.overlap_initial(ovlp[j][il], tmp1, 0);
     rght.overlap_initial(ovlp[j][ir], tmp2, 1);
-    //2-index tensor, taking_conjugate shall multiply cgc by singlet
+    //2-index tensor, taking_conjugate shall multiply cgc by a singlet tensor
     if constexpr (Sym::has_cgc)
       left.take_conjugate(0);
     overlapvec[j].contract(left, 0, rght, 0);
@@ -755,11 +756,12 @@ void DMRG<Scalar,Sym>::do_idmrg() {
     uu[ns-1-i].get_bond(2, bb1); bb1.invert_bonddir();
     uu[i+1].fuse(bb0, bb[1]);
     uu[ns-2-i].fuse(bb[2], bb1);
+    /*
     cout<<"print uu "<<i+1<<endl;
     uu[i+1].print();
     cout<<"print uu "<<ns-2-i<<endl;
     uu[ns-2-i].print();
-    
+    */
     cout << "  condition check: (i+2)*2*physpn=" << (i+2)*2*physpn << " totspin=" << totspin << endl; cout.flush();
     if (((i + 2) * 2 * physpn >= totspin && i >= 1) || i == ns / 2 - 2) {
       cout << "  prepare_input_vector_initial(" << i+1 << "," << ns-2-i << ")" << endl; cout.flush();
@@ -768,9 +770,12 @@ void DMRG<Scalar,Sym>::do_idmrg() {
       prepare_site_operator_from_left(i + 1);
       cout << "  prepare_site_operator_from_right(" << ns-2-i << ")" << endl; cout.flush();
       prepare_site_operator_from_right(ns - 2 - i);
+      cout<<"  done prepare_site_operator"<<endl;
       vec.initialize_input_vector();
       vec.normalize_vector();
+      cout<<"  begin lanczos_solve_eigenvector"<<endl;
       lanczos_solve_eigenvector_idmrg(i + 1, ns - 2 - i, vec);
+      cout<<"  done lanczos_solve_eigenvector"<<endl;
       if (i == ns / 2 - 2){
         vec.svd(uu[i+1], 1.0, uu[ns-2-i], 0.0, ww[exci]);
       }
@@ -1000,7 +1005,7 @@ void DMRG<Scalar,Sym>::save_enr() {
 // ── I/O: read_enr ────────────────────────────────────────────────────────────
 
 template<typename Scalar, typename Sym>
-void DMRG<Scalar,Sym>::read_enr(int read1, int /*read2*/) {
+void DMRG<Scalar,Sym>::read_enr(int read1, int read2) {
   char name[256];
   sprintf(name, "enr-%d-%d-%d-%d.dat", ns, read1, totspin, exci);
   std::ifstream fin(name);
@@ -1009,12 +1014,22 @@ void DMRG<Scalar,Sym>::read_enr(int read1, int /*read2*/) {
     while (fin >> e) gs_enr[exci] = e;
     cout << "read_enr: gs_enr[" << exci << "]=" << gs_enr[exci] << endl;
   }
+  if (exci > 0)
+    for (int idx = 0; idx < exci; idx++){
+      sprintf(name, "enr-%d-%d-%d-%d.dat", ns, read2, totspin, idx);
+      std::ifstream fin(name);
+      if (fin.is_open()) {
+	double e;
+	while (fin >> e) gs_enr[idx] = e;
+	cout << "read_enr: gs_enr[" << idx << "]=" << gs_enr[idx] << endl;
+      }
+    }
 }
 
 // ── I/O: read_mps ────────────────────────────────────────────────────────────
 
 template<typename Scalar, typename Sym>
-bool DMRG<Scalar,Sym>::read_mps(int read1, int /*read2*/, int /*which*/) {
+bool DMRG<Scalar,Sym>::read_mps(int read1) {
   int i, j, k, nb, nc, lc, dir, ndata, ncgc;
   char name[256], base[200], len[16], dim[16], sec[16], pos[16], exc[16];
   std::ifstream fin;
@@ -1065,7 +1080,63 @@ bool DMRG<Scalar,Sym>::read_mps(int read1, int /*read2*/, int /*which*/) {
 
 template<typename Scalar, typename Sym>
 bool DMRG<Scalar,Sym>::read_mps(int read1, int read2) {
-  return read_mps(read1, read2, 0);
+  bool pass = read_mps(read1);
+
+  if (exci > 0) {
+    int i, j, k, nb, nc, lc, dir, ndata, ncgc;
+    char name[256], base[200], len[16], dim[16], sec[16], pos[16], exc[16];
+    std::ifstream fin;
+    typename Sym::StructType strct;
+
+    sprintf(len, "%d", ns);
+    sprintf(sec, "%d", totspin);
+    sprintf(dim, "%d", read2);
+
+    for (int idx = 0; idx < exci; ++idx) {
+      bool idx_pass = true;
+      sprintf(exc, "%d", idx);
+      snprintf(base, sizeof(base), "uu-%s-%s-%s-%s-", len, dim, sec, exc);
+
+      for (i = 0; i < ns; ++i) {
+        sprintf(pos, "%d", i);
+        snprintf(name, sizeof(name), "%s%s.dat", base, pos);
+        fin.open(name);
+        if (!fin.is_open()) { idx_pass = false; continue; }
+        BondType* bonds;
+        fin >> nb >> lc;
+        bonds = new BondType[nb];
+        for (j = 0; j < nb; ++j) {
+          fin >> dir >> nc;
+          int* angm = new int[nc]; int* bdim = new int[nc];
+          for (k = 0; k < nc; ++k) fin >> angm[k];
+          for (k = 0; k < nc; ++k) fin >> bdim[k];
+          bonds[j].set(dir, nc, angm, bdim);
+          delete[] angm; delete[] bdim;
+        }
+        strct.set_struct(nb, lc, bonds);
+        delete[] bonds;
+        fin.close();
+
+        snprintf(name, sizeof(name), "%s%s.bin", base, pos);
+        fin.open(name, std::ios::binary);
+        if (fin.is_open()) {
+          strct.get_nelement(ndata, ncgc);
+          Scalar* ptr  = new Scalar[ndata + 1]();
+          double* ptr1 = new double[ncgc  + 1]();
+          fin.read(reinterpret_cast<char*>(ptr),  ndata * sizeof(Scalar));
+          fin.read(reinterpret_cast<char*>(ptr1), ncgc  * sizeof(double));
+          orth[idx][i].set(strct, ptr, ptr1);
+          delete[] ptr; delete[] ptr1;
+          fin.close();
+        } else { idx_pass = false; }
+      }
+      if (idx_pass)
+        cout << "read_mps: orth[" << idx << "] read successfully" << endl;
+    }
+  }
+  read_ww(read1, read2);
+  read_enr(read1, read2);
+  return pass;
 }
 
 // ── I/O: save_ww / read_ww ───────────────────────────────────────────────────
@@ -1082,7 +1153,7 @@ void DMRG<Scalar,Sym>::save_ww() {
 }
 
 template<typename Scalar, typename Sym>
-void DMRG<Scalar,Sym>::read_ww(int read1, int /*read2*/) {
+void DMRG<Scalar,Sym>::read_ww(int read1, int read2) {
   char name[256];
   sprintf(name, "ww-%d-%d-%d-%d.bin", ns, read1, totspin, exci);
   std::ifstream fin(name, std::ios::binary);
@@ -1092,6 +1163,17 @@ void DMRG<Scalar,Sym>::read_ww(int read1, int /*read2*/) {
   } else {
     for (int i = 0; i < read1; ++i) ww[exci][i] = 1.0;
   }
+  if (exci > 0)
+    for (int idx = 0; idx < exci; idx++){
+      sprintf(name, "ww-%d-%d-%d-%d.bin", ns, read2, totspin, idx);
+      std::ifstream fin(name, std::ios::binary);
+      if (fin.is_open()) {
+	fin.read(reinterpret_cast<char*>(ww[idx]),
+		 read2 * sizeof(double));
+      } else {
+	for (int i = 0; i < read1; ++i) ww[idx][i] = 1.0;
+      }
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

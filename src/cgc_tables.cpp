@@ -107,7 +107,6 @@ void makeup_clebsch_gordan_coefficient_tensors(int physpn, int max_angm, CGCTabl
   t.physpnsqr = t.physpn2 * t.physpn2;
   const int comm_rank = 0;  // no MPI; suppress conditional output
   CGCTable cgcfunc;
-  double* tab;
   int i, j, k, l, m, n, physpn0, physpn1;
   int a0, a1, a2, a3;
   Dense<double> tmp, tmp1, tmp2;
@@ -432,6 +431,7 @@ void makeup_clebsch_gordan_coefficient_tensors(int physpn, int max_angm, CGCTabl
                   t.fac_permutation_rght[i][j][k][l][m] = nor;
                 }
               }
+  cout << "done permutation" << endl;
   //*/
   // ── Cleanup local CGC arrays ───────────────────────────────────────────────
   delete[] cgc_coef_singlet;
